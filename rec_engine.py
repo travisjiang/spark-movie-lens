@@ -91,6 +91,22 @@ class RecommendationEngine:
 
         return ratings
 
+    def recommend_for_user(self, user_id, movies_count):
+        """
+        Recommends up to movies_count top unrated movies to user_id
+        """
+        unrated_movies = self.ratings_RDD.filter(lambda x: x[0] != user_id)\
+                .map(lambda x: (user_id, x[1])).distinct()
+
+        titles_ratings = self.model.predictAll(unrated_movies)\
+                .map(lambda x: (x[1], x[2]))\
+                .join(self.movies_titles_RDD)\
+                .map(lambda x: (x[1][1], x[1][0]))
+
+        recommend_movie = titles_ratings.takeOrdered(movies_count, lambda x:-x[1])
+
+        return recommend_movie
+
     def _load_data(self, sc, dataset_path):
         logger.info("Starting up the Recommendation Engine: ")
 
@@ -111,11 +127,12 @@ class RecommendationEngine:
         logger.info("Loading Movies data...")
         movies_file_path = os.path.join(dataset_path, 'movies.dat')
         movies_raw_RDD = self.sc.textFile(movies_file_path)
-        self.movies_RDD = movies_raw_RDD.map(lambda line: line.split(","))\
+        self.movies_RDD = movies_raw_RDD.map(lambda line: line.split("::"))\
                 .map(lambda tokens: (int(tokens[0]),tokens[1],tokens[2])).cache()
         self.movies_titles_RDD = self.movies_RDD.map(lambda x: (int(x[0]),x[1])).cache()
 
         self.training_RDD, self.test_RDD = self.ratings_RDD.randomSplit([7, 3], seed=0L)
+        #self.training_RDD = self.ratings_RDD
 
     def _test_model(self):
         test_for_predict_RDD = self.test_RDD.map(lambda x: (x[0], x[1]))
@@ -126,15 +143,14 @@ class RecommendationEngine:
 
         print 'For testing data the RMSE is %s' % (error)
 
-
-    def __init__(self, sc, dataset_path, model_path, retrain):
+    def __init__(self, sc, dataset_path, model_path):
         """Init the recommendation engine given a Spark context and a dataset path
         """
         # Load data
         self._load_data(sc, dataset_path)
 
         # train and save model
-        if retrain:
+        if not os.path.exists(model_path):
             # Train the model
             self.rank = 8
             self.seed = 5L
@@ -169,7 +185,17 @@ if __name__ == "__main__":
 
     model_path = os.path.join("./models", 'movie_lens_als')
 
-    recommendation_engine = RecommendationEngine(sc, dataset_path, model_path, False)
+    engine = RecommendationEngine(sc, dataset_path, model_path)
+
+    user_id = 10
+
+    movies = engine.recommend_for_user(user_id, 10)
+
+    for m in movies:
+        print("recommend for %d, movie: %s, ratings: %f" % (user_id, m[0],
+            m[1]))
+
+
 
 
 
