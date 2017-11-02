@@ -26,20 +26,13 @@ class ItemBasedCF:
         # train and save model
         if not os.path.exists(model_path):
             # Train the model
-            self.rank = 8
-            self.seed = 5L
-            self.iterations = 10
-            self.regularization_parameter = 0.1
-            self._train_model()
+            self.train(training_RDD)
 
             # Save model
-            logger.info("ALS model saved to %s!" % model_path)
-            self.model.save(self.sc, model_path)
 
         # load model
         else:
             logger.info("ALS model loaded from %s!" % model_path)
-            self.model = MatrixFactorizationModel.load(sc, model_path)
             logger.info("ALS model loaded!")
 
 
