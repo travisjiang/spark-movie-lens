@@ -3,6 +3,7 @@ from pyspark.mllib.recommendation import ALS
 from pyspark.mllib.recommendation import MatrixFactorizationModel
 from pyspark import SparkContext, SparkConf
 
+import operator
 from operator import add
 
 import logging
@@ -95,28 +96,38 @@ class RecommendationEngine:
         training_RDD = self.training_RDD
         test_RDD = self.test_RDD
 
-        # (user_id, [item_id])
-        user_item_test = test_RDD.map(lambda x: (x[0], x[1]))\
+        # (user_id, [(item_id, rating)])
+        user_item_test = test_RDD.map(lambda x:(x[0],(x[1], x[2])))\
             .groupByKey().mapValues(list)
-        print("user_test ", user_item_test.take(1))
+        print("user_item_test0 ", user_item_test.take(1))
+        user_item_test = user_item_test\
+            .map(lambda x:(x[0],\
+            sorted(x[1], key=operator.itemgetter(1), reverse=True)[:k]))
+        print("user_item_test0 ", user_item_test.take(1))
+        # (user_id, [item_id])
+        user_item_test = user_item_test.map(lambda x:(x[0],\
+            [t for t,_ in x[1]]))
+        print("user_item_test ", user_item_test.take(1))
 
         # (user_id, [(item_id, rating)])
         pred_ratings = self.model.predictAll(test_RDD.map(lambda x: (x[0], x[1])))\
+            .map(lambda x:(x[0], (x[1], x[2])))\
             .groupByKey().mapValues(list)
+        print("pred_ratings", pred_ratings.take(1))
         user_item_rec = pred_ratings.map(lambda x:(x[0],\
             sorted(x[1], key=operator.itemgetter(1), reverse=True)[:k]))
-        print("user_rec1 ", user_item_rec.take(1))
 
         # (user_id, [item_id])
         user_item_rec = user_item_rec.map(lambda x:(x[0],\
             [t for t,_ in x[1]]))
-        print("user_rec2 ", user_item_rec.take(1))
+        print("user_item_rec", user_item_rec.take(1))
 
         # (user_id, user_hit)
-        users_hit = user_item_test.join(user_item_rec)\
-            .map(lambda x: (x[0], set(x[1][0]) & set(x[1][1])))
+        user_item_hit = user_item_test.join(user_item_rec)\
+            .map(lambda x: (x[0], len(set(x[1][0]) & set(x[1][1]))))
+        print("user_item_hit", user_item_hit.take(10))
 
-        hit_count = users_hit.reduceByKey(add)
+        hit_count = user_item_hit.reduce(lambda x,y:x[1]+y[1])
         test_count = test_RDD.count()
         rec_count = user_item_rec.count()*k
 
