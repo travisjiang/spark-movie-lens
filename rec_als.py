@@ -14,12 +14,11 @@ import numpy as np
 
 
 class ItemBasedCF:
-    """A item recommendation engine
+    """ItemBased CF model
     * train
-    * test
-    * predict
-    * recommend_for_user
     * update
+    * predict_rating
+    * predict_top_n
     """
 
     def __init__(self, training_RDD, model_path):
@@ -50,7 +49,7 @@ class ItemBasedCF:
         #(user_id, [(unrated_item, rating)])
         self.item_pred_ratings = user_items.map(lambda x: (x[0], _compute_ratings(x[1], self.item_sim_dict)))
 
-    def predictAll(self, rdd):
+    def predict_ratings(self, rdd):
         """Predict with input rdd format (user_id, item_id)
         Returns rdd with format(user_id, item_id, rating)
         """
@@ -58,6 +57,7 @@ class ItemBasedCF:
             .join(rdd.map(lambda x:(x[0],x[1],1)))\
             .map(lambda x:(x[0]
 
+    @staticmethod
     def _flat_grouped_item(user_id, items_with_rating):
         return [((user_id, t), r) for t, r in items_with_rating]
 
@@ -128,4 +128,21 @@ class ItemBasedCF:
     def _find_item_pairs(item_with_rating):
         return [((item1[0], item2[0]),(item1[1], item2[1]))\
             for item1, item2 in combinations(item_with_rating, 2)]
+
+class RandomModel:
+    """Random recommend model
+    """
+
+    def __init__(self, training_RDD, model_path):
+        ratings_rdd = training_RDD.map(lambda x: x[3])
+        self.max_rating = ratings_rdd.max()
+        self.min_rating = ratings_rdd.min()
+    def predict_ratings(self, rdd):
+        pred_ratings = rdd.map(lambda x:ii (x[0], x[1],
+            random.uniform(self.min_rating, self.max_rating)))
+        return pred_ratings
+
+    def predict_top_n(self, rdd):
+        items = self.training_rdd.map(lambda x, x[1]).distinct()
+
 

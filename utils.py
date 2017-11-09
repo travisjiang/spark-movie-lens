@@ -15,13 +15,17 @@ def init_spark_context():
     # load spark context
     conf = SparkConf().setAppName("item_recommendation-server")
     # IMPORTANT: pass aditional Python modules to each worker
-    sc = SparkContext(conf=conf, pyFiles=['engine.py', 'app.py'])
+    sc = SparkContext(conf=conf, pyFiles=['utils.py', 'engine.py', 'app.py'])
 
     return sc
 
 
-def top_k(self, l, k, index):
-    return sorted(l, key=operator.itemgetter(index), reverse=True)[:k]
+def top_k(l, k, index):
+    sorted_l = sorted(l, key=operator.itemgetter(index), reverse=True)
+    print("sorted_l", sorted_l)
+    if len(sorted_l) > k:
+        return sorted_l[:k]
+    return sorted_l
 
 
 def test_model_rmse(model, test_RDD):
@@ -32,6 +36,7 @@ def test_model_rmse(model, test_RDD):
         training_RDD: Traning dataset used
         test_RDD: Test dataset to evaluate model
     Returns:
+        rmse of model
 
     '''
 
@@ -50,7 +55,7 @@ def test_model_rmse(model, test_RDD):
     print 'For testing data the RMSE is %s' % (error)
 
 
-def evaluate_model(self, model, k, training_RDD, test_RDD):
+def evaluate_model(model, k, training_RDD, test_RDD):
     '''Evaluate model with: precision, recall, coverage and popularity
 
     Args:
@@ -63,11 +68,15 @@ def evaluate_model(self, model, k, training_RDD, test_RDD):
 
     '''
 
+    import drpyspark
+    drpyspark.enable_debug_output()
+
     # 1. transfer test rdd
     # (user_id, [(item_id, rating)])
     user_item_test = test_RDD.map(lambda x: (x[0], (x[1], x[2]))) \
         .groupByKey().mapValues(list) \
         .map(lambda x: (x[0], top_k(x[1], k, 1)))
+    print("user_item_test1 ", user_item_test.take(1))
     # (user_id, [item_id])
     user_item_test = user_item_test.map(lambda x: (x[0],
                                                    [t for t, _ in x[1]]))
@@ -75,7 +84,7 @@ def evaluate_model(self, model, k, training_RDD, test_RDD):
 
     # 2. predict ratings
     # (user_id, [(item_id, rating)])
-    pred_ratings = self.model.predictAll(test_RDD.map(lambda x: (x[0], x[1]))) \
+    pred_ratings = model.predictAll(test_RDD.map(lambda x: (x[0], x[1]))) \
         .map(lambda x: (x[0], (x[1], x[2]))) \
         .groupByKey().mapValues(list)
     print("pred_ratings", pred_ratings.take(1))
@@ -89,12 +98,12 @@ def evaluate_model(self, model, k, training_RDD, test_RDD):
     print("user_item_rec", user_item_rec.take(1))
 
     # 4. compute hit number of each user
-    # (user_id, user_hit)
+    # (user_hit)
     user_item_hit = user_item_test.join(user_item_rec) \
-        .map(lambda x: (x[0], len(set(x[1][0]) & set(x[1][1]))))
+        .map(lambda x: len(set(x[1][0]) & set(x[1][1])))
     print("user_item_hit", user_item_hit.take(10))
 
-    hit_count = user_item_hit.reduce(lambda x, y: x[1] + y[1])
+    hit_count = user_item_hit.reduce(lambda x, y: x + y)
     test_count = test_RDD.count()
     rec_count = user_item_rec.count() * k
 
@@ -121,3 +130,48 @@ def evaluate_model(self, model, k, training_RDD, test_RDD):
            (precision, recall, coverage, popularity))
 
     return (precision, recall, coverage, popularity)
+
+def split_by_time(rdd, ratio):
+    """split data for each user by ratio in timeline
+    Args:
+        rdd: Dataset with format(user_id, item_id, rating, time)
+        ratio: Split ratio, eg.[3, 7]
+    Returns:
+        list of rdd
+
+    """
+    #import drpyspark
+    #drpyspark.enable_debug_output()
+    #(user_id, [(item_id, rating, time)])
+    sort_by_time = rdd.map(lambda x:(x[0], (x[1], x[2], x[3])))\
+            .groupByKey().mapValues(list)\
+            .map(lambda x:(x[0],sorted(x[1], key=operator.itemgetter(2), reverse=False)))
+
+    def _split_f(x, ratio):
+        s = sum(ratio)
+        b = 0
+        l = []
+        for r in ratio:
+            e = int(float(r)/s*len(x))
+            l.append(x[b:b+e])
+            b = b+e
+        return l
+
+    #(user_id, [[(item_id, rating, time)]...[]])
+    split_by_ratio = sort_by_time.map(lambda x: (x[0], _split_f(x[1], ratio)))
+
+    split_list = []
+    for i, _ in enumerate(ratio):
+        split_list.append(split_by_ratio.map(lambda x:(x[0], x[1][i]))\
+                .flatMap(lambda x:[(x[0], y[0], y[1], y[2]) for y in x[1]]))
+
+    return split_list
+
+
+
+
+
+
+
+
+

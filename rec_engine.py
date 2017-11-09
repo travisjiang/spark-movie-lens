@@ -126,8 +126,9 @@ class RecommendationEngine:
         logger.info("Loading Ratings data...")
         ratings_file_path = os.path.join(dataset_path, 'ratings.dat')
         ratings_raw_RDD = self.sc.textFile(ratings_file_path)
-        self.ratings_RDD = ratings_raw_RDD.map(lambda line: line.split("::")) .map(
-            lambda tokens: (int(tokens[0]), int(tokens[1]), float(tokens[2]))).cache()
+        self.ratings_RDD = ratings_raw_RDD.map(lambda line: line.split("::"))\
+                .map(lambda tokens: (int(tokens[0]), int(tokens[1]), float(tokens[2]),
+                int(tokens[3]))).cache()
 
         # Load items data for later use
         # format: itemid::name::class
@@ -141,8 +142,12 @@ class RecommendationEngine:
         self.items_titles_RDD = self.items_RDD.map(
             lambda x: (int(x[0]), x[1])).cache()
 
-        self.training_RDD, self.test_RDD = self.ratings_RDD.randomSplit([
-                                                                        7, 3], seed=0)
+        print("total count: ", self.ratings_RDD.count())
+        self.training_RDD, self.test_RDD = utils.split_by_time(self.ratings_RDD, [7, 3])
+        print("training_RDD:%d, test_RDD:%d " % (self.training_RDD.count(),
+            self.test_RDD.count()));
+        print("training_RDD", self.training_RDD.take(1))
+        print("test_RDD", self.test_RDD.take(1))
         #self.training_RDD = self.ratings_RDD
 
     def __init__(self, sc, dataset_path, model_path):
@@ -150,6 +155,7 @@ class RecommendationEngine:
         """
         # Load data
         self._load_data(sc, dataset_path)
+        exit()
 
         # train and save model
         if not os.path.exists(model_path):
@@ -179,17 +185,18 @@ if __name__ == "__main__":
 
     engine = RecommendationEngine(sc, dataset_path, model_path)
 
-    # test rmse
-    utils.test_model_rmse(engine.model, engine.test_RDD)
-
     # test recommend
     user_id, top_k = 10, 10
 
-    items = engine.recommend_for_user(user_id, top_k)
+    #items = engine.recommend_for_user(user_id, top_k)
 
-    for m in items:
-        print("recommend for %d, id: %d, item: %s, ratings: %f" %
-              (user_id, m[0], m[1], m[2]))
+    #for m in items:
+    #    print("recommend for %d, id: %d, item: %s, ratings: %f" %
+    #          (user_id, m[0], m[1], m[2]))
+
+    ## test rmse
+    #utils.test_model_rmse(engine.model, engine.test_RDD)
+
 
     # evaluate model
     utils.evaluate_model(engine.model, top_k, engine.training_RDD, engine.test_RDD)
