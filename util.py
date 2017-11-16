@@ -11,18 +11,24 @@ from pyspark import SparkContext, SparkConf
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def debug_open(func):
+    def wrapper(*args, **kwargs):
+        import drpyspark
+        drpyspark.enable_debug_output()
+        return func(*args, **kwargs)
+    return wrapper
+
 def init_spark_context():
     # load spark context
     conf = SparkConf().setAppName("item_recommendation-server")
     # IMPORTANT: pass aditional Python modules to each worker
-    sc = SparkContext(conf=conf, pyFiles=['utils.py', 'engine.py', 'app.py'])
+    sc = SparkContext(conf=conf, pyFiles=['util.py', 'model.py', 'engine.py', 'app.py'])
 
     return sc
 
 
 def top_k(l, k, index):
     sorted_l = sorted(l, key=operator.itemgetter(index), reverse=True)
-    print("sorted_l", sorted_l)
     if len(sorted_l) > k:
         return sorted_l[:k]
     return sorted_l
@@ -137,11 +143,9 @@ def split_by_time(rdd, ratio):
         rdd: Dataset with format(user_id, item_id, rating, time)
         ratio: Split ratio, eg.[3, 7]
     Returns:
-        list of rdd
+        tuple of split rdds
 
     """
-    #import drpyspark
-    #drpyspark.enable_debug_output()
     #(user_id, [(item_id, rating, time)])
     sort_by_time = rdd.map(lambda x:(x[0], (x[1], x[2], x[3])))\
             .groupByKey().mapValues(list)\
@@ -159,13 +163,16 @@ def split_by_time(rdd, ratio):
 
     #(user_id, [[(item_id, rating, time)]...[]])
     split_by_ratio = sort_by_time.map(lambda x: (x[0], _split_f(x[1], ratio)))
+    print("split by ratio: ", split_by_ratio.take(1))
 
     split_list = []
     for i, _ in enumerate(ratio):
         split_list.append(split_by_ratio.map(lambda x:(x[0], x[1][i]))\
                 .flatMap(lambda x:[(x[0], y[0], y[1], y[2]) for y in x[1]]))
+        print("i ", i)
+        print("len ", split_list[i].count())
 
-    return split_list
+    return tuple(split_list)
 
 
 

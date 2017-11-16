@@ -1,17 +1,14 @@
+import logging
 import os
-import math
+
+import util
+from model import RandomModel, PopularModel, ItemCFModel
 from pyspark.mllib.recommendation import ALS
 from pyspark.mllib.recommendation import MatrixFactorizationModel
-from pyspark import SparkContext, SparkConf
 
-import operator
-from operator import add
-
-import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-import utils
 
 
 def get_counts_and_averages(ID_and_ratings_tuple):
@@ -81,17 +78,22 @@ class RecommendationEngine:
 
         return ratings
 
-    def _train_model(self):
+    def _train_model(self, model_type):
         """Train the ALS model with the current dataset
         """
-        logger.info("Training the ALS model...")
-        self.model = ALS.train(
-            self.training_RDD,
-            self.rank,
-            seed=self.seed,
-            iterations=self.iterations,
-            lambda_=self.regularization_parameter)
-        logger.info("ALS model built!")
+        logger.info("Training model...")
+        self.model = {
+            "ALSModel": ALS.train(
+                self.training_RDD,
+                self.rank,
+                iterations=self.iterations,
+                lambda_=self.regularization_parameter,
+                seed=self.seed),
+            "RandomModel": RandomModel(self.sc, self.training_RDD, self.model_path),
+            "PopularModel": PopularModel(self.sc, self.training_RDD, self.model_path),
+            "ItemCFModel": ItemCFModel(self.sc, self.training_RDD, self.model_path)
+        }.get(model_type, None)
+        logger.info("model built!")
 
 
     def recommend_for_user(self, user_id, items_count):
@@ -142,61 +144,60 @@ class RecommendationEngine:
         self.items_titles_RDD = self.items_RDD.map(
             lambda x: (int(x[0]), x[1])).cache()
 
-        print("total count: ", self.ratings_RDD.count())
-        self.training_RDD, self.test_RDD = utils.split_by_time(self.ratings_RDD, [7, 3])
-        print("training_RDD:%d, test_RDD:%d " % (self.training_RDD.count(),
-            self.test_RDD.count()));
-        print("training_RDD", self.training_RDD.take(1))
-        print("test_RDD", self.test_RDD.take(1))
+        self.training_RDD, self.test_RDD = util.split_by_time(self.ratings_RDD, [7, 3])
+        self.training_RDD = self.training_RDD.map(lambda x: (x[0], x[1], x[2]))
+        self.test_RDD = self.test_RDD.map(lambda x: (x[0], x[1], x[2]))
         #self.training_RDD = self.ratings_RDD
 
-    def __init__(self, sc, dataset_path, model_path):
+    def __init__(self, sc, dataset_path, model_type, model_path, retrain = True):
         """Init the recommendation engine given a Spark context and a dataset path
         """
         # Load data
+        self.model_path = model_path
         self._load_data(sc, dataset_path)
-        exit()
 
         # train and save model
-        if not os.path.exists(model_path):
+        if retrain or not os.path.exists(model_path):
             # Train the model
             self.rank = 8
             self.seed = 5
             self.iterations = 10
             self.regularization_parameter = 0.1
-            self._train_model()
+            self._train_model(model_type)
 
             # Save model
-            logger.info("ALS model saved to %s!" % model_path)
-            self.model.save(self.sc, model_path)
+            logger.info("model saved to %s!" % model_path)
+            #self.model.save(self.sc, model_path)
 
         # load model
         else:
-            logger.info("ALS model loaded from %s!" % model_path)
+            logger.info("model loaded from %s!" % model_path)
             self.model = MatrixFactorizationModel.load(sc, model_path)
 
 # this is for test
 if __name__ == "__main__":
 
-    sc = utils.init_spark_context()
+    sc = util.init_spark_context()
 
     dataset_path = os.path.join('datasets', 'ml-10M100K')
     model_path = os.path.join("./models", 'movie_lens_als')
+    model_list = ["ALSModel", "RandomModel", "PopularModel"]
 
-    engine = RecommendationEngine(sc, dataset_path, model_path)
+    for model_type in model_list:
+        engine = RecommendationEngine(sc, dataset_path, model_type, model_path)
 
-    # test recommend
-    user_id, top_k = 10, 10
+        # test recommend
+        user_id, top_k = 10, 10
 
-    #items = engine.recommend_for_user(user_id, top_k)
+        #items = engine.recommend_for_user(user_id, top_k)
 
-    #for m in items:
-    #    print("recommend for %d, id: %d, item: %s, ratings: %f" %
-    #          (user_id, m[0], m[1], m[2]))
+        #for m in items:
+        #    print("recommend for %d, id: %d, item: %s, ratings: %f" %
+        #          (user_id, m[0], m[1], m[2]))
 
-    ## test rmse
-    #utils.test_model_rmse(engine.model, engine.test_RDD)
+        # test rmse
+        util.test_model_rmse(engine.model, engine.test_RDD)
 
 
-    # evaluate model
-    utils.evaluate_model(engine.model, top_k, engine.training_RDD, engine.test_RDD)
+        # evaluate model
+        #util.evaluate_model(engine.model, top_k, engine.training_RDD, engine.test_RDD)
