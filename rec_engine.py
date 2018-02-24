@@ -93,6 +93,8 @@ class RecommendationEngine:
             "PopularModel": PopularModel(self.sc, self.training_RDD, self.model_path),
             "ItemCFModel": ItemCFModel(self.sc, self.training_RDD, self.model_path)
         }.get(model_type, None)
+        if hasattr(self.model, "fit"):
+            self.model.fit()
         logger.info("model built!")
 
 
@@ -143,6 +145,8 @@ class RecommendationEngine:
             .map(lambda tokens: (int(tokens[0]), tokens[1], tokens[2])).cache()
         self.items_titles_RDD = self.items_RDD.map(
             lambda x: (int(x[0]), x[1])).cache()
+
+        self.ratings_RDD = self.ratings_RDD.sample(False, 0.1)
 
         self.training_RDD, self.test_RDD = util.split_by_time(self.ratings_RDD, [7, 3])
         self.training_RDD = self.training_RDD.map(lambda x: (x[0], x[1], x[2]))
@@ -196,8 +200,9 @@ if __name__ == "__main__":
         #          (user_id, m[0], m[1], m[2]))
 
         # test rmse
-        util.test_model_rmse(engine.model, engine.test_RDD)
+        print("======")
+        #util.test_model_rmse(engine.model, engine.test_RDD)
 
 
         # evaluate model
-        #util.evaluate_model(engine.model, top_k, engine.training_RDD, engine.test_RDD)
+        util.evaluate_model(engine.model, top_k, engine.training_RDD, engine.test_RDD)

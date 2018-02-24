@@ -4,6 +4,7 @@ import util
 import logging
 
 from itertools import combinations
+from operator import add
 import operator
 
 import numpy as np
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 
-class _BaseModel:
+class _BaseModel(object):
     """Abstract object representing a recommend model
 
     Every recommend model must implement:
@@ -61,8 +62,6 @@ class _BaseModel:
             user_product, RDD), "user_product should be RDD of (user, product)"
         first = user_product.first()
         assert len(first) == 2, "user_product should be RDD of (user, product)"
-        #(user_id, item_id)
-        user_product = user_product.map(lambda u_p: (int(u_p[0]), int(u_p[1])))
 
     def recommendProducts(self, user, num):
         """
@@ -95,8 +94,14 @@ class RandomModel(_BaseModel):
             retrain)
 
     def fit(self):
-        self.max_rating = self.training_rdd.max()
-        self.min_rating = self.training_rdd.min()
+        #self.max_rating = self.sc.broadcast(self.training_rdd.map(lambda
+        #    x:x[2]).max())
+        #self.min_rating = self.sc.broadcast(self.training_rdd.map(lambda
+        #    x:x[2]).min())
+        self.max_rating = (self.training_rdd.map(lambda
+            x:x[2]).max())
+        self.min_rating = (self.training_rdd.map(lambda
+            x:x[2]).min())
 
         self.item_set = self.sc.broadcast(
             self.training_rdd.map(
@@ -124,15 +129,22 @@ class RandomModel(_BaseModel):
         Returns:
             rdd with format (user_id, item_id, rating)
         """
-        user_product = super(RandomModel, self).predictAll(user_product)
+        super(RandomModel, self).predictAll(user_product)
+        #(user_id, item_id)
+        user_product = user_product.map(lambda u_p: (int(u_p[0]), int(u_p[1])))
 
+        print("user_product", user_product.take(10))
+        #minr, maxr = self.min_rating.value, self.max_rating.value
+        minr, maxr = self.min_rating, self.max_rating
         pred_ratings = user_product.map(
             lambda x: Rating(
                 x[0],
                 x[1],
+            #    0.1))
                 np.random.uniform(
-                    self.min_rating,
-                    self.max_rating)))
+                    minr,
+                    maxr)))
+        print("pred_ratings", pred_ratings.take(10))
         return pred_ratings
 
     def recommendProducts(self, user, num):
@@ -221,7 +233,7 @@ class PopularModel(_BaseModel):
         self.item_popular = self.sc.broadcast(
             self.training_rdd.map(
                 lambda x: (
-                    x[1], 1)).reduceByKey(add).sortedBy(
+                    x[1], 1)).reduceByKey(add).sortBy(
                 lambda x: x[1]).collect())
 
     def recommendProducts(self, user, num):
@@ -262,6 +274,7 @@ class PopularModel(_BaseModel):
 
         rated_list = self.training_rdd.map(
             lambda x: (x[0], x[1])).groupByKey().mapValues(list)
+        print("rated_list ", rated_list.take(5))
 
         rec_list = rated_list.map(
             lambda x: (
@@ -275,6 +288,7 @@ class PopularModel(_BaseModel):
                      x[0],
                      p[0],
                      p[1])) for p in x[1]])
+        print("rec_list ", rec_list.take(5))
 
         #(user_id, [Rating])
         return rec_list
@@ -282,7 +296,7 @@ class PopularModel(_BaseModel):
     def _popular_sample(self, rated_list, n):
         s = set(rated_list)
         unrated_list = []
-        for t, p in self.item_popular:
+        for t, p in self.item_popular.value:
             if t not in s:
                 unrated_list.append((t, p))
             if len(unrated_list) == n:
@@ -343,8 +357,9 @@ class ItemCFModel(_BaseModel):
         Returns:
             rdd with format (user_id, item_id, rating)
         """
+        super(RandomModel, self).predictAll(user_product)
         #(user_id, item_id)
-        user_product = super(ItemCFModel, self).predictAll(user_product)
+        user_product = user_product.map(lambda u_p: (int(u_p[0]), int(u_p[1])))
 
         #((user_id, item_id), (rating, 1))
         pred_ratings = self.item_pred_ratings \

@@ -50,6 +50,8 @@ def test_model_rmse(model, test_RDD):
 
     predictions = model.predictAll(
         test_for_predict_RDD).map(lambda r: ((r[0], r[1]), r[2]))
+    print("test_RDD", test_RDD.take(10))
+    print("prediction", predictions.take(10))
     rates_and_preds = test_RDD.map(
         lambda r: ((int(r[0]), int(r[1])), float(r[2]))).join(predictions)
     error = math.sqrt(
@@ -74,8 +76,6 @@ def evaluate_model(model, k, training_RDD, test_RDD):
 
     '''
 
-    import drpyspark
-    drpyspark.enable_debug_output()
 
     # 1. transfer test rdd
     # (user_id, [(item_id, rating)])
